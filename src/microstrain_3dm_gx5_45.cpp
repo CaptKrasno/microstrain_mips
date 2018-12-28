@@ -44,7 +44,8 @@ namespace Microstrain
     odom_child_frame_id_("odom_frame"),
     publish_gps_(true),
     publish_imu_(true),
-    publish_odom_(true)
+    publish_odom_(true),
+    use_external_gps_(false)
   {
     // pass
   }
@@ -143,6 +144,7 @@ namespace Microstrain
     private_nh.param("imu_rate",imu_rate_, 10);
     private_nh.param("nav_rate",nav_rate_, 10);
     private_nh.param("dynamics_mode",pdyn_mode,1);
+
     dynamics_mode = (u8)pdyn_mode;
     if (dynamics_mode < 1 || dynamics_mode > 3){
       ROS_WARN("dynamics_mode can't be %#04X, must be 1, 2 or 3.  Setting to 1.",dynamics_mode);
@@ -165,6 +167,18 @@ namespace Microstrain
     private_nh.param("publish_imu",publish_imu_, true);
     private_nh.param("publish_odom",publish_odom_, true);
 
+    // external GPS settings
+    private_nh.param("external_gps_topic",external_gps_topic_,std::string(""));
+    private_nh.param("external_gps_twist_topic",external_gps_twist_topic_,std::string(""));
+    private_nh.param("external_gps_offset_x",external_gps_offset_x_, 0.0f);
+    private_nh.param("external_gps_offset_y",external_gps_offset_y_, 0.0f);
+    private_nh.param("external_gps_offset_z",external_gps_offset_z_, 0.0f);
+
+
+    if(publish_gps_&&external_gps_topic_!=""){
+        ROS_WARN("publish_gps is set to true but use_external_gps has been enabled by specifing external_gps_topic.  Disabling microstrain GPS publisher use '%s' for NavsatFix messages instead",external_gps_topic_.c_str());
+        publish_gps_=false;
+    }
     // ROS publishers and subscribers
     if (publish_gps_)
       gps_pub_ = node.advertise<sensor_msgs::NavSatFix>("gps/fix",100);
@@ -175,6 +189,7 @@ namespace Microstrain
       nav_pub_ = node.advertise<nav_msgs::Odometry>("nav/odom",100);
       nav_status_pub_ = node.advertise<std_msgs::Int16MultiArray>("nav/status",100);
     }
+
     ros::ServiceServer service = node.advertiseService("reset_kf", &Microstrain::reset_callback, this);
 
 
@@ -292,21 +307,57 @@ namespace Microstrain
 	
       } // end of AHRS setup
 
+
+      // external GPS settings
+      if(external_gps_topic_!=""){
+          if(external_gps_twist_topic_==""){
+              ROS_ERROR("if you specify an external_gps_topic you must also specify external_gps_twist_topic");
+          }
+          use_external_gps_=true;
+          ROS_INFO("Listening for external GPS on topic: %s ", external_gps_topic_.c_str() );
+          if(external_gps_offset_x_==0.0f && external_gps_offset_y_==0.0f && external_gps_offset_z_==0){
+              ROS_WARN("External GPS is being used but no offsets were set.\nRecomend setting external_gps_offset_x, external_gps_offset_y, external_gps_offset_z params");
+          }
+
+          external_gps_sub_.subscribe(node, external_gps_topic_, 1);
+          external_gps_twist_sub_.subscribe(node, external_gps_twist_topic_, 1);
+          //typedef message_filters::sync_policies::ExactTime<sensor_msgs::NavSatFix, geometry_msgs::TwistWithCovarianceStamped> MySyncPolicy;
+          //message_filters::Synchronizer<MySyncPolicy> sync(MySyncPolicy(10), external_gps_sub_, external_gps_twist_sub_);
+
+          sync.reset(new Sync(MySyncPolicy(10),external_gps_sub_, external_gps_twist_sub_));
+          sync->registerCallback(boost::bind(&Microstrain::external_gps_callback,this, _1, _2));
+
+
+          //external_gps_sub_ = node.subscribe(external_gps_topic_,10,&Microstrain::external_gps_callback,this);
+          u8 source = 0x02;  // 0x02 = external source
+          ROS_INFO("Setting GPS source to external");
+          while(mip_filter_gps_source(&device_interface_,MIP_FUNCTION_SELECTOR_WRITE,&source)!= MIP_INTERFACE_OK){};
+          ros::Duration(dT).sleep();
+          ROS_INFO("setting GPS antenna offsetts");
+          float offset[3];
+          offset[0]=external_gps_offset_x_;
+          offset[1]=external_gps_offset_y_;
+          offset[2]=external_gps_offset_z_;
+          while(mip_filter_antenna_offset(&device_interface_,MIP_FUNCTION_SELECTOR_WRITE,offset) != MIP_INTERFACE_OK){};
+          ros::Duration(dT).sleep();
+      }
+
       // GPS Setup
       if (publish_gps_){
-      
-	while(mip_3dm_cmd_get_gps_base_rate(&device_interface_, &base_rate) != MIP_INTERFACE_OK){}
-	ROS_INFO("GPS Base Rate => %d Hz", base_rate);
-	u8 gps_decimation = (u8)((float)base_rate/ (float)gps_rate_);
-	ros::Duration(dT).sleep();
-      
+        if(!use_external_gps_){
+            while(mip_3dm_cmd_get_gps_base_rate(&device_interface_, &base_rate) != MIP_INTERFACE_OK){}
+        }
+        ROS_INFO("GPS Base Rate => %d Hz", base_rate);
+        u8 gps_decimation = (u8)((float)base_rate/ (float)gps_rate_);
+        ros::Duration(dT).sleep();
+
 	////////// GPS Message Format
 	// Set
 	ROS_INFO("Setting GPS stream format");
 	data_stream_format_descriptors[0] = MIP_GPS_DATA_LLH_POS;
 	data_stream_format_descriptors[1] = MIP_GPS_DATA_NED_VELOCITY;
 	data_stream_format_descriptors[2] = MIP_GPS_DATA_GPS_TIME;
-	data_stream_format_decimation[0]  = gps_decimation; //0x01; //0x04;
+        data_stream_format_decimation[0]  = gps_decimation; //0x01; //0x04;
 	data_stream_format_decimation[1]  = gps_decimation; //0x01; //0x04;
 	data_stream_format_decimation[2]  = gps_decimation; //0x01; //0x04;
 	data_stream_format_num_entries = 3;
@@ -320,6 +371,11 @@ namespace Microstrain
 	  ros::Duration(dT).sleep();
 	}
       } // end of GPS setup
+
+
+
+
+      //end of External GPS
 
       if (publish_odom_){
 	while(mip_3dm_cmd_get_filter_base_rate(&device_interface_, &base_rate) != MIP_INTERFACE_OK){}
@@ -516,6 +572,44 @@ namespace Microstrain
     mip_sdk_port_close(device_interface_.port_handle);
     
   } // End of ::run()
+
+  void Microstrain::external_gps_callback(const sensor_msgs::NavSatFixConstPtr &fix, const geometry_msgs::TwistWithCovarianceStampedConstPtr &twist){
+      //std::chrono::gps_clock gpsClock;
+      double utc_double = fix->header.stamp.toSec();
+      double gps_time;
+      double tow;
+      u16 week;
+      double current_leap_offset = CURRENT_LEAP_SECCONDS-LEAP_SECCONDS_1980;
+      gps_time = utc_double-GPS_TIME_OFFSET+current_leap_offset;
+      tow = std::fmod(gps_time,SEC_IN_WEEK);
+      week = u16(gps_time/SEC_IN_WEEK);
+//      std::cout<< std::setprecision(18) << "gps time: "<< gps_time << std::endl;
+//      std::cout<< std::setprecision(18) << "tow time: "<< tow << std::endl;
+//      std::cout<< std::setprecision(18) << "week    : "<< week << std::endl;
+      if(utc_double>LEAP_SECCONDS_EXPIRE){
+          ROS_WARN("leap second data has expired!  Please update leap second info in microstrain_3dm_gx5_45.h");
+      }
+      mip_filter_external_gps_update_command message;
+      message.pos[0]=           fix->latitude;
+      message.pos[1]=           fix->longitude;
+      message.pos[2]=           fix->altitude;
+      message.pos_1sigma[0]=    sqrt(float(fix->position_covariance[0]));
+      message.pos_1sigma[1]=    sqrt(float(fix->position_covariance[4]));
+      message.pos_1sigma[2]=    sqrt(float(fix->position_covariance[8]));
+      message.vel[0]=           float(twist->twist.twist.linear.y); // north velocity
+      message.vel[1]=           float(twist->twist.twist.linear.x); // east velocty
+      message.vel[2]=           float(twist->twist.twist.linear.z); // vertical velocity
+      message.vel_1sigma[0]=    sqrt(float(twist->twist.covariance[7]));  // y cov
+      message.vel_1sigma[1]=    sqrt(float(twist->twist.covariance[0]));  // x cov
+      message.vel_1sigma[2]=    sqrt(float(twist->twist.covariance[14])); // z cov
+      message.tow=tow;
+      message.week_number=week;
+      //ROS_INFO("gps Callback");
+      if(mip_filter_external_gps_update(&device_interface_,&message) != MIP_INTERFACE_OK){
+          ROS_WARN("failed to send external GPS info");
+      }
+      return;
+  }
   
   bool Microstrain::reset_callback(std_srvs::Empty::Request &req,
 				   std_srvs::Empty::Response &resp)
@@ -948,9 +1042,10 @@ namespace Microstrain
 		    gps_msg_.status.status = curr_llh_pos_.valid_flags - 1;
 		    gps_msg_.status.service = 1;  // assumed
 		    // Header
-		    gps_msg_.header.seq = gps_valid_packet_count_;
-		    gps_msg_.header.stamp = ros::Time::now();
-		    gps_msg_.header.frame_id = gps_frame_id_;
+                    gps_msg_.header.seq = gps_valid_packet_count_;
+                    //! @todo this should maybe be the time reported by the sensor
+                    gps_msg_.header.stamp = ros::Time::now();
+                    gps_msg_.header.frame_id = gps_frame_id_;
 
 		  }break;
 

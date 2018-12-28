@@ -36,6 +36,7 @@ extern "C" {
 
 #include <cstdio>
 #include <unistd.h>
+#include <cmath>
 
 
 // ROS
@@ -47,6 +48,23 @@ extern "C" {
 #include "std_msgs/Int16MultiArray.h"
 #include "std_msgs/MultiArrayLayout.h"
 #include "std_srvs/Empty.h"
+#include "geometry_msgs/TwistWithCovarianceStamped.h"
+#include <message_filters/subscriber.h>
+#include <message_filters/synchronizer.h>
+#include <message_filters/sync_policies/exact_time.h>
+#include <sensor_msgs/Image.h>
+#include <sensor_msgs/CameraInfo.h>
+
+
+#define LEAP_SECCONDS_1980	19.0
+/// update these values after the expiration date
+/// @note VALID THROUGH 28 June 2019
+#define CURRENT_LEAP_SECCONDS	37.0
+#define LEAP_SECCONDS_EXPIRE    1561680000.0  //28 June 2019 in unix time  source: https://www.ietf.org/timezones/data/leap-seconds.list
+
+#define SEC_IN_WEEK             604800.0
+#define GPS_TIME_OFFSET         315964800.0
+
 
 #define MIP_SDK_GX4_45_IMU_STANDARD_MODE	0x01
 #define MIP_SDK_GX4_45_IMU_DIRECT_MODE	0x02
@@ -89,6 +107,8 @@ namespace Microstrain
     void ahrs_packet_callback(void *user_ptr, u8 *packet, u16 packet_size, u8 callback_type);
     //! @brief GPS callback
     void gps_packet_callback(void *user_ptr, u8 *packet, u16 packet_size, u8 callback_type);
+
+    void external_gps_callback(const sensor_msgs::NavSatFixConstPtr &fix, const geometry_msgs::TwistWithCovarianceStampedConstPtr &twist);
     
   private:
   //! @brief Reset KF service callback
@@ -141,6 +161,13 @@ namespace Microstrain
   ros::Publisher imu_pub_;
   ros::Publisher nav_pub_;
   ros::Publisher nav_status_pub_;
+  message_filters::Subscriber<sensor_msgs::NavSatFix> external_gps_sub_;
+  message_filters::Subscriber<geometry_msgs::TwistWithCovarianceStamped> external_gps_twist_sub_;
+  typedef message_filters::sync_policies::ExactTime<sensor_msgs::NavSatFix, geometry_msgs::TwistWithCovarianceStamped> MySyncPolicy;
+  typedef message_filters::Synchronizer<MySyncPolicy> Sync;
+  boost::shared_ptr<Sync> sync;
+//  ros::Subscriber external_gps_sub_;
+//  ros::Subscriber external_gps_twist_sub_;
   sensor_msgs::NavSatFix gps_msg_;
   sensor_msgs::Imu imu_msg_;
   nav_msgs::Odometry nav_msg_;
@@ -153,6 +180,13 @@ namespace Microstrain
   bool publish_imu_;
   bool publish_odom_;
 
+  // External GPS config
+  std::string external_gps_topic_; ///< Default blank string.  If this contains a topic an external gps will be used
+  std::string external_gps_twist_topic_;
+  bool use_external_gps_;
+  float external_gps_offset_x_;
+  float external_gps_offset_y_;
+  float external_gps_offset_z_;
   // Update rates
   int nav_rate_;
   int imu_rate_;
