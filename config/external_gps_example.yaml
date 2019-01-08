@@ -1,0 +1,21 @@
+port:                   "/dev/ttyUSB0"
+baudrate:               115200
+publish_gps:            false                           # this should be false if you want to use external gps
+publish_imu:            true
+publish_odom:           true
+gps_rate:               1
+imu_rate:               10
+nav_rate:               10
+gps_frame_id:           "wgs84"
+imu_frame_id:           "base_link"
+odom_frame_id:          "wgs84"
+odom_child_frame_id:    "base_link"
+external_gps_topic:     "/rover_ublox/fix"              # the fix topic you want to use as gps input to the microstrain
+external_gps_twist_topic: "/rover_ublox/fix_velocity"   # the topic brodcasting GPS velocity
+
+# the offset of the gps antenna in the MICROSTRAIN reference frame
+# NOTE:  this reference frame is different thatn that published by the microstrain ROS node
+# please use the axes printed on the device for reference
+external_gps_offset_x:  -0.305
+external_gps_offset_y:  -0.064
+external_gps_offset_z:  0

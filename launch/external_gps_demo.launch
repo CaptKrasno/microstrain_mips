@@ -1,0 +1,21 @@
+<!--
+this file provides an example of how to use an external gps ros message as input to the
+microstrain unit.
+
+this particular example was used to configure the system with a ublox RTK GPS which has
+substancially better precision than the internal microstrain GPS
+-->
+<launch>
+    <node name="microstrain_3dm_gx5_45_node"
+    pkg="microstrain_3dm_gx5_45"
+    type="microstrain_3dm_gx5_45_node" output="screen">
+        <rosparam command="load" file="$(find microstrain_3dm_gx5_45)/config/external_gps_example.yaml" />
+        <param name="device_setup" value="true" type="bool" />
+        <param name="readback_settings" value="true" type="bool" />
+        <param name="save_settings" value="true" type="bool" />
+        <param name="auto_init" value="true" type="bool" />
+        <param name="dynamics_mode" value="1" type="int" />
+        <param name="declination_source" value="2" type="int" />
+        <param name="declination" value="0.23" type="double" />
+    </node>
+</launch>
