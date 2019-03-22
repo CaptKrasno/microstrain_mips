@@ -395,6 +395,7 @@ namespace Microstrain
 	data_stream_format_descriptors[5] = MIP_FILTER_DATA_ATT_UNCERTAINTY_EULER;
 	data_stream_format_descriptors[6] = MIP_FILTER_DATA_COMPENSATED_ANGULAR_RATE;
 	data_stream_format_descriptors[7] = MIP_FILTER_DATA_FILTER_STATUS;
+        data_stream_format_descriptors[8] = MIP_FILTER_DATA_FILTER_TIMESTAMP;
 	data_stream_format_decimation[0]  = nav_decimation; //0x32;
 	data_stream_format_decimation[1]  = nav_decimation; //0x32;
 	data_stream_format_decimation[2]  = nav_decimation; //0x32;
@@ -403,7 +404,8 @@ namespace Microstrain
 	data_stream_format_decimation[5]  = nav_decimation; //0x32;
 	data_stream_format_decimation[6]  = nav_decimation; //0x32;
 	data_stream_format_decimation[7]  = nav_decimation; //0x32;
-	data_stream_format_num_entries = 8;
+        data_stream_format_decimation[8]  = nav_decimation; //0x32;
+        data_stream_format_num_entries = 9;
 	while(mip_3dm_cmd_filter_message_format(&device_interface_, MIP_FUNCTION_SELECTOR_WRITE, &data_stream_format_num_entries,data_stream_format_descriptors, data_stream_format_decimation) != MIP_INTERFACE_OK){}
 	ros::Duration(dT).sleep();
 	// Poll to verify
@@ -583,9 +585,15 @@ namespace Microstrain
       gps_time = utc_double-GPS_TIME_OFFSET+current_leap_offset;
       tow = std::fmod(gps_time,SEC_IN_WEEK);
       week = u16(gps_time/SEC_IN_WEEK);
+//      std::cout<< std::setprecision(18) << "utc time: "<< utc_double << std::endl;
 //      std::cout<< std::setprecision(18) << "gps time: "<< gps_time << std::endl;
 //      std::cout<< std::setprecision(18) << "tow time: "<< tow << std::endl;
 //      std::cout<< std::setprecision(18) << "week    : "<< week << std::endl;
+//      std::cout<< "difference from system clock: " << (ros::Time::now().toSec() - utc_double) << std::endl  << std::endl;
+      double time_error = ros::Time::now().toSec() - utc_double;
+      if(fabs(time_error)>0.2){
+          ROS_WARN("ROS Time diverges from GPS time by %f sec",time_error);
+      }
       if(utc_double>LEAP_SECCONDS_EXPIRE){
           ROS_WARN("leap second data has expired!  Please update leap second info in microstrain_3dm_gx5_45.h");
       }
@@ -651,7 +659,6 @@ namespace Microstrain
 	      ///
 	      // Decode the field
 	      ///
-
 	      switch(field_header->descriptor)
 		{
 		  ///
@@ -666,12 +673,14 @@ namespace Microstrain
 		    mip_filter_llh_pos_byteswap(&curr_filter_pos_);
 
 		    nav_msg_.header.seq = filter_valid_packet_count_;
-		    nav_msg_.header.stamp = ros::Time::now();
+
 		    nav_msg_.header.frame_id = odom_frame_id_;
 		    nav_msg_.child_frame_id = odom_child_frame_id_;
 		    nav_msg_.pose.pose.position.y = curr_filter_pos_.latitude;
 		    nav_msg_.pose.pose.position.x = curr_filter_pos_.longitude;
 		    nav_msg_.pose.pose.position.z = curr_filter_pos_.ellipsoid_height;
+
+
 
 		  }break;
 
@@ -807,7 +816,36 @@ namespace Microstrain
 		    nav_status_pub_.publish(nav_status_msg_);
 
 
+
 		  }break;
+
+                case MIP_FILTER_DATA_FILTER_TIMESTAMP:
+                  {
+                    memcpy(&curr_filter_timestamp_, field_data, sizeof(mip_filter_timestamp));
+                    mip_filter_timestamp_byteswap(&curr_filter_timestamp_);
+                    std::cout.precision(17);
+
+//                    std::cout << "solution time:: week: " << curr_filter_timestamp_.week_number << "  tow: " << curr_filter_timestamp_.tow <<std::endl;
+
+                    double gps_time = curr_filter_timestamp_.week_number * SEC_IN_WEEK + curr_filter_timestamp_.tow;
+                    double current_leap_offset = CURRENT_LEAP_SECCONDS-LEAP_SECCONDS_1980;
+                    double utc_double = gps_time + GPS_TIME_OFFSET - current_leap_offset;
+
+//                    std::cout << "current ros time: " << ros::Time::now().toSec() << std::endl;
+//                    std::cout << "gps time: " << gps_time << std::endl;
+//                    std::cout << "gps time UTC: " << utc_double << std::endl;
+//                    std::cout << (ros::Time::now().toSec()-utc_double ) << std::endl;
+
+                    double time_error = ros::Time::now().toSec()-utc_double;
+                    if(fabs(time_error)>0.5){
+                        ROS_WARN("ROS Time diverges from Microstrain solution time by %f sec",time_error);
+                    }
+                    if(utc_double>LEAP_SECCONDS_EXPIRE){
+                        ROS_WARN("leap second data has expired!  Please update leap second info in microstrain_3dm_gx5_45.h");
+                    }
+                    ros::Time filter_time(utc_double);
+                    nav_msg_.header.stamp = filter_time;
+                  }break;
 
 		default: break;
 		}
@@ -894,6 +932,7 @@ namespace Microstrain
 		    // Stuff into ROS message - acceleration in m/s^2
 		    // Header
 		    imu_msg_.header.seq = ahrs_valid_packet_count_;
+                    ///! \todo: this should be reported from the message not ros:time:: now
 		    imu_msg_.header.stamp = ros::Time::now();
 		    imu_msg_.header.frame_id = imu_frame_id_;
 		    imu_msg_.linear_acceleration.x = 9.81*curr_ahrs_accel_.scaled_accel[0];
@@ -1071,7 +1110,8 @@ namespace Microstrain
 		    memcpy(&curr_gps_time_, field_data, sizeof(mip_gps_time));
 
 		    //For little-endian targets, byteswap the data field
-		    mip_gps_time_byteswap(&curr_gps_time_);
+                    mip_gps_time_byteswap(&curr_gps_time_);
+                    //std::cout<<"week: " << curr_gps_time_.week_number << "tow: " << curr_gps_time_.tow <<std::endl;
 
 		  }break;
 

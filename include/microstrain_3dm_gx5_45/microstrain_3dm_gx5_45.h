@@ -37,6 +37,8 @@ extern "C" {
 #include <cstdio>
 #include <unistd.h>
 #include <cmath>
+#include <chrono>
+#include <ctime>
 
 
 // ROS
@@ -155,6 +157,7 @@ namespace Microstrain
   mip_filter_ned_vel_uncertainty   curr_filter_vel_uncertainty_;
   mip_filter_euler_attitude_uncertainty curr_filter_att_uncertainty_;
   mip_filter_status curr_filter_status_;
+  mip_filter_timestamp curr_filter_timestamp_;
 
   // ROS 
   ros::Publisher gps_pub_;
