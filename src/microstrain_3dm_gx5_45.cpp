@@ -227,7 +227,10 @@ namespace Microstrain
       ROS_INFO("Putting device communications into 'standard mode'");
       device_descriptors_size  = 128*2;
       com_mode = MIP_SDK_GX4_45_IMU_STANDARD_MODE;
-      while(mip_system_com_mode(&device_interface_, MIP_FUNCTION_SELECTOR_WRITE, &com_mode) != MIP_INTERFACE_OK){}
+      while(mip_system_com_mode(&device_interface_, MIP_FUNCTION_SELECTOR_WRITE, &com_mode) != MIP_INTERFACE_OK){
+          ROS_WARN_THROTTLE(1,"error running mip_system_com_mode");
+          ros::spinOnce();
+      }
       //Verify device mode setting
       ROS_INFO("Verify comm's mode");
       while(mip_system_com_mode(&device_interface_, MIP_FUNCTION_SELECTOR_READ, &com_mode) != MIP_INTERFACE_OK){}
@@ -585,11 +588,7 @@ namespace Microstrain
       gps_time = utc_double-GPS_TIME_OFFSET+current_leap_offset;
       tow = std::fmod(gps_time,SEC_IN_WEEK);
       week = u16(gps_time/SEC_IN_WEEK);
-//      std::cout<< std::setprecision(18) << "utc time: "<< utc_double << std::endl;
-//      std::cout<< std::setprecision(18) << "gps time: "<< gps_time << std::endl;
-//      std::cout<< std::setprecision(18) << "tow time: "<< tow << std::endl;
-//      std::cout<< std::setprecision(18) << "week    : "<< week << std::endl;
-//      std::cout<< "difference from system clock: " << (ros::Time::now().toSec() - utc_double) << std::endl  << std::endl;
+
       double time_error = ros::Time::now().toSec() - utc_double;
       if(fabs(time_error)>0.2){
           ROS_WARN("ROS Time diverges from GPS time by %f sec",time_error);
