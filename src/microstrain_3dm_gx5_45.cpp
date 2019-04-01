@@ -45,7 +45,8 @@ namespace Microstrain
     publish_gps_(true),
     publish_imu_(true),
     publish_odom_(true),
-    use_external_gps_(false)
+    use_external_gps_(false),
+    private_nh("~")
   {
     // pass
   }
@@ -125,7 +126,7 @@ namespace Microstrain
     // ROS setup
     ros::Time::init();
     ros::NodeHandle node;
-    ros::NodeHandle private_nh("~");
+    //ros::NodeHandle private_nh("~");
 
     // ROS Parameters
     // Comms Parameters
@@ -173,6 +174,14 @@ namespace Microstrain
     private_nh.param("external_gps_offset_x",external_gps_offset_x_, 0.0f);
     private_nh.param("external_gps_offset_y",external_gps_offset_y_, 0.0f);
     private_nh.param("external_gps_offset_z",external_gps_offset_z_, 0.0f);
+
+    bool debug;
+    private_nh.param("debug",debug, false);
+    if(debug){
+      if (ros::console::set_logger_level(ROSCONSOLE_DEFAULT_NAME,
+                                         ros::console::levels::Debug))
+       ros::console::notifyLoggerLevelsChanged();
+    }
 
 
     if(publish_gps_&&external_gps_topic_!=""){
@@ -581,6 +590,16 @@ namespace Microstrain
   void Microstrain::external_gps_callback(const sensor_msgs::NavSatFixConstPtr &fix, const geometry_msgs::TwistWithCovarianceStampedConstPtr &twist){
       //std::chrono::gps_clock gpsClock;
       double utc_double = fix->header.stamp.toSec();
+//      double txMicrostrainDelay;
+//      private_nh.param("tx_delay" , txMicrostrainDelay , 0.0);
+//      double dt = (ros::Time::now().toSec() - utc_double) + txMicrostrainDelay;
+//      ROS_INFO("dt: %f", dt);
+//      ROS_INFO("TxMicrosecondDelay: %f", txMicrostrainDelay);
+//      double utc_offset = utc_double+dt;
+
+//      ROS_INFO("utc_double: %f",utc_double);
+//      ROS_INFO("utc_offset: %f",utc_offset);
+
       double gps_time;
       double tow;
       u16 week;
@@ -836,8 +855,9 @@ namespace Microstrain
 //                    std::cout << (ros::Time::now().toSec()-utc_double ) << std::endl;
 
                     double time_error = ros::Time::now().toSec()-utc_double;
-                    if(fabs(time_error)>0.5){
-                        ROS_WARN("ROS Time diverges from Microstrain solution time by %f sec",time_error);
+                    ROS_DEBUG_THROTTLE(1.0,"Microstrain solution time error: %f",time_error);
+                    if(fabs(time_error)>0.1){
+                        ROS_WARN_THROTTLE(5.0,"ROS Time diverges from Microstrain solution time by %f sec (this message will repeat in 5 sec if this issue persists)",time_error);
                     }
                     if(utc_double>LEAP_SECCONDS_EXPIRE){
                         ROS_WARN("leap second data has expired!  Please update leap second info in microstrain_3dm_gx5_45.h");

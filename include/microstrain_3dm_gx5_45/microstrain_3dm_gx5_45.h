@@ -160,6 +160,7 @@ namespace Microstrain
   mip_filter_timestamp curr_filter_timestamp_;
 
   // ROS 
+  ros::NodeHandle private_nh;
   ros::Publisher gps_pub_;
   ros::Publisher imu_pub_;
   ros::Publisher nav_pub_;
