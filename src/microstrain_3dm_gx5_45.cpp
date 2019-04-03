@@ -400,8 +400,8 @@ namespace Microstrain
 	ROS_INFO("Setting Filter stream format");
 	data_stream_format_descriptors[0] = MIP_FILTER_DATA_LLH_POS;
 	data_stream_format_descriptors[1] = MIP_FILTER_DATA_NED_VEL;
-	//data_stream_format_descriptors[2] = MIP_FILTER_DATA_ATT_EULER_ANGLES;
-	data_stream_format_descriptors[2] = MIP_FILTER_DATA_ATT_QUATERNION;
+        data_stream_format_descriptors[2] = MIP_FILTER_DATA_ATT_EULER_ANGLES;
+        //data_stream_format_descriptors[2] = MIP_FILTER_DATA_ATT_QUATERNION;
 	data_stream_format_descriptors[3] = MIP_FILTER_DATA_POS_UNCERTAINTY;
 	data_stream_format_descriptors[4] = MIP_FILTER_DATA_VEL_UNCERTAINTY;
 	data_stream_format_descriptors[5] = MIP_FILTER_DATA_ATT_UNCERTAINTY_EULER;
@@ -470,6 +470,7 @@ namespace Microstrain
 	while(mip_filter_heading_source(&device_interface_, MIP_FUNCTION_SELECTOR_WRITE, &heading_source) != MIP_INTERFACE_OK)
 	{} 
 	ros::Duration(dT).sleep();
+
 	
 	ROS_INFO("Read back heading source...");
 	while(mip_filter_heading_source(&device_interface_, 
@@ -486,6 +487,20 @@ namespace Microstrain
 					  NULL)!= MIP_INTERFACE_OK){}
 	  ros::Duration(dT).sleep();
 	}
+
+        ROS_INFO("Setting estimation control to Enabled:[acc bias hard/soft iron, gyro bias offset and auto gps antenna offset]  and Disable: [nothing]");
+        estimation_control = 0x7f;
+        while(mip_filter_estimation_control(&device_interface_, MIP_FUNCTION_SELECTOR_WRITE, &estimation_control) != MIP_INTERFACE_OK)
+        {}
+        ros::Duration(dT).sleep();
+
+
+        ROS_INFO("Read back estimation control source...");
+        while(mip_filter_estimation_control(&device_interface_,
+                                        MIP_FUNCTION_SELECTOR_READ,
+                                        &estimation_control_readback)!= MIP_INTERFACE_OK){}
+        ROS_INFO("estimation control = %#04X",estimation_control_readback);
+        ros::Duration(dT).sleep();
       }  // end of Filter setup
 
       // I believe the auto-init pertains to the kalman filter for the -45
@@ -740,6 +755,15 @@ namespace Microstrain
 
 		    //For little-endian targets, byteswap the data field
 		    mip_filter_attitude_euler_angles_byteswap(&curr_filter_angles_);
+                    //ROS_INFO("yaw %f",curr_filter_angles_.yaw);
+                    tf2::Quaternion orientation;
+                    double yaw = -curr_filter_angles_.yaw + 3.14159/2;
+                    double pitch = -curr_filter_angles_.pitch;
+                    orientation.setRPY( curr_filter_angles_.roll, pitch , yaw);
+                    nav_msg_.pose.pose.orientation.x = orientation.getX();
+                    nav_msg_.pose.pose.orientation.y = orientation.getY();
+                    nav_msg_.pose.pose.orientation.z = orientation.getZ();
+                    nav_msg_.pose.pose.orientation.w = orientation.getW();
 
 		  }break;
 
@@ -749,13 +773,19 @@ namespace Microstrain
 		    memcpy(&curr_filter_quaternion_, field_data, sizeof(mip_filter_attitude_quaternion));
 
 		    //For little-endian targets, byteswap the data field
-		    mip_filter_attitude_quaternion_byteswap(&curr_filter_quaternion_);
+                    mip_filter_attitude_quaternion_byteswap(&curr_filter_quaternion_);
 
 		    // put into ENU - swap X/Y, invert Z
-		    nav_msg_.pose.pose.orientation.x = curr_filter_quaternion_.q[2];
-		    nav_msg_.pose.pose.orientation.y = curr_filter_quaternion_.q[1];
-		    nav_msg_.pose.pose.orientation.z = -1.0*curr_filter_quaternion_.q[3];
-		    nav_msg_.pose.pose.orientation.w = curr_filter_quaternion_.q[0];
+//                    nav_msg_.pose.pose.orientation.x = curr_filter_quaternion_.q[2];
+//                    nav_msg_.pose.pose.orientation.y = curr_filter_quaternion_.q[1];
+//                    nav_msg_.pose.pose.orientation.z = -1.0*curr_filter_quaternion_.q[3];
+//                    nav_msg_.pose.pose.orientation.w = curr_filter_quaternion_.q[0];
+
+//                    nav_msg_.pose.pose.orientation.w = curr_filter_quaternion_.q[0];
+//                    nav_msg_.pose.pose.orientation.x = curr_filter_quaternion_.q[1];
+//                    nav_msg_.pose.pose.orientation.y = curr_filter_quaternion_.q[2];
+//                    nav_msg_.pose.pose.orientation.z = curr_filter_quaternion_.q[3];
+
 
 		  }break;
 
